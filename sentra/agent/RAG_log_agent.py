@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 import faiss
 from langchain_openai import AzureOpenAIEmbeddings
 from sentra.parser.s3_log_parser import parse_log_file
+from sentra.agent.gpt_responder import ask_gpt
 
 load_dotenv()
 
@@ -54,17 +55,23 @@ def search(query, top_k=3):
 
 # Main runner
 if __name__ == "__main__":
-    file_path = "data/sample_logs/s3_access_sample.log"  # Your log file
+    file_path = "data/sample_logs/s3_access_sample.log"
 
     log_chunks = load_log_chunks(file_path)
     if log_chunks:
         store_vector(log_chunks)
 
-        query = "Were there any failed GET requests?"
+        query = input("🔍 Enter your query: ")
         results = search(query)
-        print(f"\n🔍 Query: {query}")
+
+        print(f"\n📄 Query: {query}")
         print("📄 Matching Log Entries:")
         for r in results:
             print("➤", r)
-        else:
-            print("Log file is empty or failed to parse.")
+
+        # Ask GPT for analysis
+        print("\n🤖 GPT Insight:")
+        print(ask_gpt(query, results))
+
+    else:
+        print("⚠️ Log file is empty or failed to parse.")
