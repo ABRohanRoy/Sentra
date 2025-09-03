@@ -38,7 +38,7 @@ def store_vector(log_chunks):
         for log in log_chunks:
             f.write(log + "\n")
 
-    print("✅ Vector stored successfully")
+    print("Vector stored successfully")
     return vectors
 
 def search(query, top_k=3):
