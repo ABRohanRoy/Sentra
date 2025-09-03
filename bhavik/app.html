@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>EC2 Log Analyzer</title>
+   <style>
+    body { 
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+        margin: 0; 
+        padding: 0; 
+        background: #f0f2f5; 
+        color: #333; 
+    }
+    .container { 
+        max-width: 900px; 
+        margin: 50px auto; 
+        background: #fff; 
+        padding: 40px; 
+        border-radius: 12px; 
+        box-shadow: 0 4px 20px rgba(0,0,0,0.1); 
+    }
+    h1 { 
+        color: #222; 
+        text-align: center; 
+        font-size: 2.2em; 
+        margin-bottom: 10px;
+    }
+    h2 { 
+        color: #444; 
+        margin-bottom: 15px; 
+        font-size: 1.5em; 
+    }
+    .section { 
+        margin: 30px 0; 
+        padding: 25px; 
+        border-radius: 10px; 
+        transition: all 0.3s ease; 
+    }
+    .upload-section { 
+        background: #e6f7ff; 
+        border: 1px solid #91d5ff; 
+    }
+    .query-section { 
+        background: #fff0f6; 
+        border: 1px solid #ffadd2; 
+    }
+    .results-section { 
+        background: #fffbe6; 
+        border: 1px solid #ffe58f; 
+    }
+    input[type="file"], textarea { 
+        width: 100%; 
+        padding: 12px; 
+        border: 1px solid #ccc; 
+        border-radius: 6px; 
+        box-sizing: border-box;
+        font-size: 1em;
+    }
+    textarea { 
+        height: 100px; 
+        resize: vertical; 
+    }
+    button { 
+        background: #1890ff; 
+        color: white; 
+        padding: 12px 28px; 
+        border: none; 
+        border-radius: 6px; 
+        cursor: pointer; 
+        font-size: 16px; 
+        transition: 0.3s;
+    }
+    button:hover { 
+        background: #096dd9; 
+    }
+    .flash-messages { 
+        margin: 20px 0; 
+    }
+    .flash-success { 
+        background: #f6ffed; 
+        color: #389e0d; 
+        padding: 12px; 
+        border-radius: 6px; 
+        border: 1px solid #b7eb8f; 
+        font-weight: 500;
+    }
+    .flash-error { 
+        background: #fff1f0; 
+        color: #cf1322; 
+        padding: 12px; 
+        border-radius: 6px; 
+        border: 1px solid #ffa39e; 
+        font-weight: 500;
+    }
+    .result-item { 
+        background: #fafafa; 
+        padding: 18px; 
+        margin: 12px 0; 
+        border-radius: 8px; 
+        border-left: 6px solid #1890ff; 
+        word-break: break-word;
+    }
+    .gpt-analysis { 
+        background: #f0f5ff; 
+        padding: 20px; 
+        border-radius: 8px; 
+        border: 2px solid #69c0ff; 
+        white-space: pre-wrap; 
+        word-wrap: break-word;
+    }
+    ol, ul { 
+        padding-left: 20px; 
+    }
+    li { 
+        margin-bottom: 8px; 
+        line-height: 1.5em; 
+    }
+    p, strong { 
+        font-size: 1em; 
+    }
+</style>
+
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 EC2 Log Analyzer</h1>
+        <p>Upload your log files and ask questions about them using AI.</p>
+
+        <!-- Flash Messages -->
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                <div class="flash-messages">
+                    {% for message in messages %}
+                        {% if message.startswith('SUCCESS') %}
+                            <div class="flash-success">✅ {{ message }}</div>
+                        {% elif message.startswith('ERROR') %}
+                            <div class="flash-error">❌ {{ message }}</div>
+                        {% else %}
+                            <div class="flash-error">⚠️ {{ message }}</div>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        <!-- Upload Section -->
+        <div class="section upload-section">
+            <h2>📁 Step 1: Upload Log File</h2>
+            <form method="post" action="{{ url_for('upload') }}" enctype="multipart/form-data">
+                <p><strong>Select your log file:</strong></p>
+                <input type="file" name="file" accept=".log,.txt" required>
+                <br><br>
+                <button type="submit">🚀 Process Log File</button>
+            </form>
+        </div>
+
+        <!-- Query Section -->
+        <div class="section query-section">
+            <h2>💬 Step 2: Ask Questions</h2>
+            <form method="post" action="{{ url_for('query') }}">
+                <p><strong>Enter your query:</strong></p>
+                <textarea name="query" placeholder="Example: Show me all 404 errors, What are the most common IP addresses?, Find failed login attempts..." required>{{ query or '' }}</textarea>
+                <br><br>
+                <button type="submit">🔍 Search Logs</button>
+            </form>
+        </div>
+
+        <!-- Results Section -->
+        {% if results %}
+        <div class="section results-section">
+            <h2>📊 Results for: "{{ query }}"</h2>
+            
+            <h3>📄 Matching Log Entries:</h3>
+            {% for result in results %}
+            <div class="result-item">
+                <strong>Result {{ loop.index }}:</strong><br>
+                <code>{{ result }}</code>
+            </div>
+            {% endfor %}
+
+            <h3>🤖 AI Analysis:</h3>
+            <div class="gpt-analysis">
+                <pre>{{ gpt_analysis }}</pre>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Instructions -->
+        <div class="section">
+            <h3>📖 How to Use:</h3>
+            <ol>
+                <li><strong>Upload:</strong> Choose a .log or .txt file containing your EC2 logs</li>
+                <li><strong>Wait:</strong> The system will process and create AI embeddings</li>
+                <li><strong>Query:</strong> Ask natural language questions about your logs</li>
+                <li><strong>Analyze:</strong> Review matching entries and AI insights</li>
+            </ol>
+            
+            <h3>💡 Example Queries:</h3>
+            <ul>
+                <li>"Show me all 404 errors"</li>
+                <li>"What are the most frequent IP addresses?"</li>
+                <li>"Find suspicious login attempts"</li>
+                <li>"Show me server errors from last hour"</li>
+            </ul>
+        </div>
+    </div>
+
+    <style>
+/* Existing styles ... */
+
+.result-item code {
+    display: block;       /* Make code appear as a block */
+    white-space: pre-wrap; /* Wrap long lines */
+    word-break: break-word; /* Break words if too long */
+    font-family: 'Courier New', monospace;
+    background: #f0f0f0;
+    padding: 10px;
+    border-radius: 6px;
+    overflow-x: auto;    /* Add horizontal scroll if still too long */
+}
+
+.gpt-analysis pre {
+    white-space: pre-wrap; /* Wrap long lines */
+    word-wrap: break-word; /* Ensure it breaks */
+    font-family: 'Courier New', monospace;
+    overflow-x: auto;      /* Scroll if too long */
+}
+
+/* Optional: prevent overlapping on smaller screens */
+.container {
+    word-wrap: break-word;
+}
+</style>
+
+</body>
+</html> 
