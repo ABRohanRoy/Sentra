@@ -1,140 +1,406 @@
-from flask import Flask, render_template, request, jsonify, flash
+# backend.py
+"""
+Fast, optimized backend for Sentra log analysis
+- Simplified imports and error handling
+- Faster processing with batch operations
+- Memory-efficient FAISS operations
+- Robust parsing with fallbacks
+"""
+
 import os
+import re
+import json
+import hashlib
+from typing import List, Dict, Tuple, Optional
+from itertools import islice
 import numpy as np
-from dotenv import load_dotenv
-import faiss
-from werkzeug.utils import secure_filename
+from collections import defaultdict, Counter
 
-# Import Sentra modules instead of redefining
-from sentra.parser.s3_log_parser import parse_log_file
-from sentra.agent.gpt_responder import ask_gpt
+# Simple embedding fallback using TF-IDF if transformers not available
+_embedding_model = None
+_use_tfidf = False
 
-# Load environment variables
-load_dotenv()
+try:
+    from sentence_transformers import SentenceTransformer
+    _embedding_model = SentenceTransformer("all-MiniLM-L6-v2", device='cpu')
+    print("✓ Using sentence-transformers for embeddings")
+except Exception:
+    try:
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        _embedding_model = TfidfVectorizer(max_features=384, stop_words='english', ngram_range=(1,2))
+        _use_tfidf = True
+        print("✓ Using TF-IDF for embeddings (fallback)")
+    except Exception:
+        print("⚠ No embedding model available - install sentence-transformers or scikit-learn")
 
-# Flask app configuration
-app = Flask(__name__)
-app.config['SECRET_KEY'] = os.getenv("FLASK_SECRET_KEY", "fallback-secret")
-app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+# FAISS import with error handling
+try:
+    import faiss
+except Exception:
+    print("❌ FAISS not found. Install with: pip install faiss-cpu")
+    raise
 
-# Create upload directory if it doesn't exist
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+# Paths
+DATA_DIR = "data"
+os.makedirs(DATA_DIR, exist_ok=True)
+VECTOR_INDEX_PATH = os.path.join(DATA_DIR, "index.faiss")
+METADATA_PATH = os.path.join(DATA_DIR, "metadata.json")
+MEMORY_PATH = os.path.join(DATA_DIR, "memory.json")
 
-# ------------------ Reuse Sentra RAG functions ------------------
-from langchain_openai import AzureOpenAIEmbeddings
+# Global cache
+_INDEX_CACHE = None
+_METADATA_CACHE = None
 
-embedding_model = AzureOpenAIEmbeddings(
-    openai_api_key=os.getenv("Embedding_AZURE_OPENAI_API_KEY"),
-    azure_endpoint=os.getenv("Embedding_AZURE_OPENAI_ENDPOINT"),
-    deployment=os.getenv("Embedding_AZURE_OPENAI_DEPLOYMENT_NAME"),
-    openai_api_version=os.getenv("Embedding_AZURE_OPENAI_API_VERSION"),
-    chunk_size=10,
-)
-
-def load_log_chunks(file_path):
-    log_dicts = parse_log_file(file_path)
-    logs = [
-        f"[{log['timestamp']}] IP: {log['ip']} | Action: {log['action']} | Endpoint: {log['endpoint']} | Status: {log['status']}"
-        for log in log_dicts if log
+class FastLogParser:
+    """Unified fast parser with pattern matching"""
+    
+    # Common patterns
+    IP_PATTERN = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
+    TIMESTAMP_PATTERNS = [
+        re.compile(r'\[([^\]]+)\]'),  # [timestamp]
+        re.compile(r'(\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2})'),  # ISO
+        re.compile(r'(\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})'),  # syslog
     ]
-    return logs
-
-def store_vector(log_chunks):
-    vectors = np.array(embedding_model.embed_documents(log_chunks)).astype("float32")
-    dimension = vectors.shape[1]
-
-    index = faiss.IndexFlatL2(dimension)
-    index.add(vectors)
-    faiss.write_index(index, "faiss_vector.index")
-
-    with open("logs_reference.txt", "w", encoding="utf-8") as f:
-        for log in log_chunks:
-            f.write(log + "\n")
-
-    print("✅ Vector stored successfully")
-    return vectors
-
-def search(query, top_k=3):
-    index = faiss.read_index("faiss_vector.index")
-    query_vector = np.array([embedding_model.embed_query(query)]).astype("float32")
-    distances, indices = index.search(query_vector, top_k)
-
-    with open("logs_reference.txt", "r", encoding="utf-8") as f:
-        logs = f.readlines()
-
-    results = [logs[i].strip() for i in indices[0]]
-    return results
-
-# ------------------ Flask Routes ------------------
-
-@app.route('/')
-def index():
-    return render_template('index.html')
-
-@app.route('/upload', methods=['POST'])
-def upload_file():
-    try:
-        if 'file' not in request.files:
-            flash("ERROR: No file selected")
-            return render_template('index.html')
-
-        file = request.files['file']
-        if file.filename == '':
-            flash("ERROR: No file selected")
-            return render_template('index.html')
-
-        if file and file.filename.rsplit('.', 1)[1].lower() in {'log', 'txt'}:
-            filename = secure_filename(file.filename)
-            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(file_path)
-
-            log_chunks = load_log_chunks(file_path)
-
-            if log_chunks:
-                store_vector(log_chunks)
-                flash(f"SUCCESS: File uploaded and processed successfully! Found {len(log_chunks)} log entries.")
-            else:
-                flash("ERROR: Log file is empty or failed to parse.")
+    HTTP_PATTERN = re.compile(r'"(GET|POST|PUT|DELETE|HEAD|PATCH)\s+(\S+).*?"\s+(\d{3})')
+    STATUS_PATTERN = re.compile(r'\b([2-5]\d{2})\b')
+    
+    def parse_file(self, file_path: str) -> List[Dict]:
+        """Fast unified parsing"""
+        entries = []
+        filename = os.path.basename(file_path)
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                for line_num, line in enumerate(f, 1):
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    
+                    entry = {
+                        'id': hashlib.md5(f"{filename}:{line_num}:{line}".encode()).hexdigest()[:12],
+                        'source_file': filename,
+                        'line_number': line_num,
+                        'raw': line,
+                        'text': line  # for embedding
+                    }
+                    
+                    # Extract fields
+                    self._extract_fields(entry, line)
+                    entries.append(entry)
+                    
+        except Exception as e:
+            print(f"Error parsing {file_path}: {e}")
+            
+        return entries
+    
+    def _extract_fields(self, entry: Dict, line: str):
+        """Extract common fields fast"""
+        # IP addresses
+        ip_matches = self.IP_PATTERN.findall(line)
+        if ip_matches:
+            entry['ip'] = ip_matches[0]
+        
+        # Timestamps
+        for pattern in self.TIMESTAMP_PATTERNS:
+            match = pattern.search(line)
+            if match:
+                entry['timestamp'] = match.group(1)
+                break
+        
+        # HTTP requests
+        http_match = self.HTTP_PATTERN.search(line)
+        if http_match:
+            entry['method'] = http_match.group(1)
+            entry['endpoint'] = http_match.group(2)
+            entry['status'] = http_match.group(3)
         else:
-            flash("ERROR: Invalid file type. Please upload a .log or .txt file.")
+            # Fallback status code search
+            status_match = self.STATUS_PATTERN.search(line)
+            if status_match:
+                entry['status'] = status_match.group(1)
 
-    except Exception as e:
-        flash(f"ERROR: {str(e)}")
+class FastEmbedder:
+    """Fast embedding with caching"""
+    
+    def __init__(self):
+        self.model = _embedding_model
+        self.use_tfidf = _use_tfidf
+        self._fitted = False
+    
+    def embed_batch(self, texts: List[str]) -> np.ndarray:
+        """Fast batch embedding"""
+        if not self.model:
+            # Fallback to simple word hashing
+            return self._hash_embeddings(texts)
+        
+        if self.use_tfidf:
+            if not self._fitted:
+                self.model.fit(texts)
+                self._fitted = True
+            vectors = self.model.transform(texts).toarray()
+        else:
+            vectors = self.model.encode(texts, batch_size=32, show_progress_bar=False)
+        
+        return vectors.astype('float32')
+    
+    def embed_query(self, query: str) -> np.ndarray:
+        """Fast query embedding"""
+        if not self.model:
+            return self._hash_embeddings([query])
+        
+        if self.use_tfidf:
+            if not self._fitted:
+                # If not fitted, return zeros
+                return np.zeros((1, 384), dtype='float32')
+            return self.model.transform([query]).toarray().astype('float32')
+        else:
+            return self.model.encode([query]).astype('float32')
+    
+    def _hash_embeddings(self, texts: List[str]) -> np.ndarray:
+        """Fallback hash-based embeddings"""
+        embeddings = []
+        for text in texts:
+            # Simple hash-based embedding
+            words = text.lower().split()
+            vec = np.zeros(384)
+            for i, word in enumerate(words[:50]):  # limit words
+                hash_val = hash(word) % 384
+                vec[hash_val] += 1.0 / (i + 1)  # position weighting
+            embeddings.append(vec)
+        return np.array(embeddings, dtype='float32')
 
-    return render_template('index.html')
+class FastSearch:
+    """Fast FAISS-based search"""
+    
+    def __init__(self):
+        self.index = None
+        self.embedder = FastEmbedder()
+        self.metadata = []
+        self.id_to_idx = {}
+    
+    def load_or_create_index(self) -> bool:
+        """Load existing index or create new one"""
+        global _INDEX_CACHE, _METADATA_CACHE
+        
+        if _INDEX_CACHE is not None:
+            self.index = _INDEX_CACHE
+            self.metadata = _METADATA_CACHE or []
+            self._rebuild_id_mapping()
+            return True
+        
+        if os.path.exists(VECTOR_INDEX_PATH) and os.path.exists(METADATA_PATH):
+            try:
+                self.index = faiss.read_index(VECTOR_INDEX_PATH)
+                with open(METADATA_PATH, 'r') as f:
+                    self.metadata = json.load(f)
+                self._rebuild_id_mapping()
+                _INDEX_CACHE = self.index
+                _METADATA_CACHE = self.metadata
+                return True
+            except Exception as e:
+                print(f"Error loading index: {e}")
+        
+        return False
+    
+    def _rebuild_id_mapping(self):
+        """Rebuild ID to index mapping"""
+        self.id_to_idx = {item['id']: i for i, item in enumerate(self.metadata)}
+    
+    def add_entries(self, entries: List[Dict]) -> int:
+        """Add entries to index"""
+        if not entries:
+            return 0
+        
+        # Extract texts for embedding
+        texts = [entry['text'] for entry in entries]
+        vectors = self.embedder.embed_batch(texts)
+        
+        if self.index is None:
+            # Create new index
+            dim = vectors.shape[1]
+            self.index = faiss.IndexFlatL2(dim)
+            self.metadata = []
+        
+        # Add to index
+        self.index.add(vectors)
+        
+        # Add metadata
+        for entry in entries:
+            self.metadata.append({
+                'id': entry['id'],
+                'source_file': entry['source_file'],
+                'line_number': entry.get('line_number'),
+                'ip': entry.get('ip'),
+                'timestamp': entry.get('timestamp'),
+                'method': entry.get('method'),
+                'endpoint': entry.get('endpoint'),
+                'status': entry.get('status'),
+            })
+        
+        self._rebuild_id_mapping()
+        self._save_index()
+        
+        # Update cache
+        global _INDEX_CACHE, _METADATA_CACHE
+        _INDEX_CACHE = self.index
+        _METADATA_CACHE = self.metadata
+        
+        return len(entries)
+    
+    def search(self, query: str, k: int = 5) -> List[Dict]:
+        """Fast semantic search"""
+        if not self.index or self.index.ntotal == 0:
+            return []
+        
+        query_vector = self.embedder.embed_query(query)
+        distances, indices = self.index.search(query_vector, min(k, self.index.ntotal))
+        
+        results = []
+        for i, idx in enumerate(indices[0]):
+            if idx >= 0 and idx < len(self.metadata):
+                result = self.metadata[idx].copy()
+                result['score'] = float(distances[0][i])
+                results.append(result)
+        
+        return results
+    
+    def _save_index(self):
+        """Save index and metadata"""
+        try:
+            faiss.write_index(self.index, VECTOR_INDEX_PATH)
+            with open(METADATA_PATH, 'w') as f:
+                json.dump(self.metadata, f, indent=2)
+        except Exception as e:
+            print(f"Error saving index: {e}")
 
-@app.route('/search', methods=['POST'])
-def search_logs():
+class Analytics:
+    """Fast analytics and insights"""
+    
+    @staticmethod
+    def analyze_results(results: List[Dict]) -> str:
+        """Fast result analysis"""
+        if not results:
+            return "No results found."
+        
+        total = len(results)
+        ips = Counter(r.get('ip') for r in results if r.get('ip'))
+        statuses = Counter(r.get('status') for r in results if r.get('status'))
+        methods = Counter(r.get('method') for r in results if r.get('method'))
+        files = Counter(r.get('source_file') for r in results if r.get('source_file'))
+        
+        parts = [f"Found {total} matching entries."]
+        
+        if ips:
+            top_ips = ips.most_common(3)
+            parts.append(f"Top IPs: {', '.join(f'{ip}({c})' for ip, c in top_ips)}")
+        
+        if statuses:
+            parts.append(f"Status codes: {', '.join(f'{s}({c})' for s, c in statuses.most_common(3))}")
+        
+        if methods:
+            parts.append(f"Methods: {', '.join(f'{m}({c})' for m, c in methods.most_common(3))}")
+        
+        return " | ".join(parts)
+
+# Global instances
+_parser = FastLogParser()
+_search = FastSearch()
+_analytics = Analytics()
+
+# Memory functions
+def save_memory(data: Dict):
+    """Save memory data"""
     try:
-        query = request.form.get('query', '').strip()
+        with open(MEMORY_PATH, 'w') as f:
+            json.dump(data, f)
+    except Exception:
+        pass
 
-        if not query:
-            flash("ERROR: Query cannot be empty")
-            return render_template('index.html')
+def load_memory() -> Dict:
+    """Load memory data"""
+    try:
+        if os.path.exists(MEMORY_PATH):
+            with open(MEMORY_PATH, 'r') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
 
-        if not os.path.exists("faiss_vector.index"):
-            flash("ERROR: No log data available. Please upload a log file first.")
-            return render_template('index.html')
+# Public API
+def process_files(file_paths: List[str]) -> Tuple[int, int]:
+    """Process log files and add to index"""
+    _search.load_or_create_index()
+    
+    all_entries = []
+    for file_path in file_paths:
+        if os.path.exists(file_path):
+            entries = _parser.parse_file(file_path)
+            all_entries.extend(entries)
+    
+    if all_entries:
+        added = _search.add_entries(all_entries)
+        return len(all_entries), added
+    
+    return 0, 0
 
-        results = search(query)
-        gpt_response = ask_gpt(query, results)
+def search_logs(query: str, top_k: int = 5) -> List[Dict]:
+    """Search logs with semantic similarity"""
+    _search.load_or_create_index()
+    return _search.search(query, top_k)
 
-        return render_template('index.html', query=query, results=results, gpt_analysis=gpt_response)
+def analyze_results(results: List[Dict]) -> str:
+    """Analyze search results"""
+    return _analytics.analyze_results(results)
 
-    except Exception as e:
-        flash(f"ERROR: Search failed: {str(e)}")
-        return render_template('index.html')
+def get_stats() -> Dict:
+    """Get system statistics"""
+    _search.load_or_create_index()
+    metadata = _search.metadata or []
+    
+    return {
+        'total_entries': len(metadata),
+        'total_files': len(set(item.get('source_file') for item in metadata if item.get('source_file'))),
+        'unique_ips': len(set(item.get('ip') for item in metadata if item.get('ip'))),
+        'has_index': _search.index is not None and _search.index.ntotal > 0
+    }
 
-@app.route('/status')
-def status():
-    has_index = os.path.exists("faiss_vector.index")
-    has_reference = os.path.exists("logs_reference.txt")
-    return jsonify({
-        'ready': has_index and has_reference,
-        'has_index': has_index,
-        'has_reference': has_reference
-    })
+def remember_query(query: str):
+    """Remember last query"""
+    memory = load_memory()
+    memory['last_query'] = query
+    memory.setdefault('query_history', []).append(query)
+    memory['query_history'] = memory['query_history'][-10:]  # keep last 10
+    save_memory(memory)
 
-if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+def get_last_query() -> Optional[str]:
+    """Get last query"""
+    memory = load_memory()
+    return memory.get('last_query')
+
+def get_dashboard_data() -> Dict:
+    """Get dashboard data"""
+    _search.load_or_create_index()
+    metadata = _search.metadata or []
+    
+    if not metadata:
+        return {'error': 'No data available'}
+    
+    # Count by IP
+    ip_counts = Counter(item.get('ip') for item in metadata if item.get('ip'))
+    
+    # Count by file
+    file_counts = Counter(item.get('source_file') for item in metadata if item.get('source_file'))
+    
+    # Count by status
+    status_counts = Counter(item.get('status') for item in metadata if item.get('status'))
+    
+    return {
+        'top_ips': dict(ip_counts.most_common(10)),
+        'file_stats': dict(file_counts),
+        'status_codes': dict(status_counts.most_common(10)),
+        'total_entries': len(metadata)
+    }
+
+# Initialize on import
+if __name__ != "__main__":
+    _search.load_or_create_index()
