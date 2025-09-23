@@ -1,0 +1,313 @@
+{
+  "logType": "SecurityEvents",
+  "awsAccountId": "009160049834",
+  "region": "us-east-1",
+  "logStartTime": "2025-09-22T08:15:23Z",
+  "logEndTime": "2025-09-22T08:21:55Z",
+  "source": "EC2-SecurityLogs",
+  "instanceId": "i-0abc123def456789",
+  "events": [
+    {
+      "eventTime": "2025-09-22T08:15:23Z",
+      "eventType": "SSH_LOGIN_FAILURE",
+      "sourceIP": "192.168.100.50",
+      "username": "root",
+      "port": 22,
+      "protocol": "ssh2",
+      "processId": 12345,
+      "severity": "WARNING",
+      "message": "Failed password for root from 192.168.100.50 port 22 ssh2"
+    },
+    {
+      "eventTime": "2025-09-22T08:15:25Z",
+      "eventType": "SSH_LOGIN_FAILURE",
+      "sourceIP": "192.168.100.50",
+      "username": "root",
+      "port": 22,
+      "protocol": "ssh2",
+      "processId": 12346,
+      "severity": "WARNING",
+      "message": "Failed password for root from 192.168.100.50 port 22 ssh2"
+    },
+    {
+      "eventTime": "2025-09-22T08:15:27Z",
+      "eventType": "SSH_LOGIN_FAILURE",
+      "sourceIP": "192.168.100.50",
+      "username": "admin",
+      "port": 22,
+      "protocol": "ssh2",
+      "processId": 12347,
+      "severity": "WARNING",
+      "message": "Failed password for admin from 192.168.100.50 port 22 ssh2"
+    },
+    {
+      "eventTime": "2025-09-22T08:15:29Z",
+      "eventType": "SSH_LOGIN_FAILURE",
+      "sourceIP": "192.168.100.50",
+      "username": "administrator",
+      "port": 22,
+      "protocol": "ssh2",
+      "processId": 12348,
+      "severity": "WARNING",
+      "message": "Failed password for administrator from 192.168.100.50 port 22 ssh2"
+    },
+    {
+      "eventTime": "2025-09-22T08:15:31Z",
+      "eventType": "SSH_LOGIN_FAILURE",
+      "sourceIP": "192.168.100.50",
+      "username": "user",
+      "port": 22,
+      "protocol": "ssh2",
+      "processId": 12349,
+      "severity": "WARNING",
+      "message": "Failed password for user from 192.168.100.50 port 22 ssh2"
+    },
+    {
+      "eventTime": "2025-09-22T08:15:33Z",
+      "eventType": "SSH_LOGIN_FAILURE",
+      "sourceIP": "192.168.100.50",
+      "username": "test",
+      "port": 22,
+      "protocol": "ssh2",
+      "processId": 12350,
+      "severity": "WARNING",
+      "message": "Failed password for test from 192.168.100.50 port 22 ssh2"
+    },
+    {
+      "eventTime": "2025-09-22T08:15:35Z",
+      "eventType": "SSH_LOGIN_FAILURE",
+      "sourceIP": "192.168.100.50",
+      "username": "guest",
+      "port": 22,
+      "protocol": "ssh2",
+      "processId": 12351,
+      "severity": "WARNING",
+      "message": "Failed password for guest from 192.168.100.50 port 22 ssh2"
+    },
+    {
+      "eventTime": "2025-09-22T08:15:37Z",
+      "eventType": "SSH_LOGIN_FAILURE",
+      "sourceIP": "192.168.100.50",
+      "username": "ubuntu",
+      "port": 22,
+      "protocol": "ssh2",
+      "processId": 12352,
+      "severity": "WARNING",
+      "message": "Failed password for ubuntu from 192.168.100.50 port 22 ssh2"
+    },
+    {
+      "eventTime": "2025-09-22T08:16:15Z",
+      "eventType": "SSH_LOGIN_FAILURE",
+      "sourceIP": "192.168.100.50",
+      "username": "root",
+      "port": 22,
+      "protocol": "ssh2",
+      "processId": 12360,
+      "severity": "WARNING",
+      "message": "Failed password for root from 192.168.100.50 port 22 ssh2"
+    },
+    {
+      "eventTime": "2025-09-22T08:16:45Z",
+      "eventType": "SSH_LOGIN_FAILURE",
+      "sourceIP": "203.0.113.25",
+      "username": "root",
+      "port": 22,
+      "protocol": "ssh2",
+      "processId": 12366,
+      "severity": "WARNING",
+      "message": "Failed password for root from 203.0.113.25 port 22 ssh2"
+    },
+    {
+      "eventTime": "2025-09-22T08:16:47Z",
+      "eventType": "SSH_LOGIN_FAILURE",
+      "sourceIP": "203.0.113.25",
+      "username": "admin",
+      "port": 22,
+      "protocol": "ssh2",
+      "processId": 12367,
+      "severity": "WARNING",
+      "message": "Failed password for admin from 203.0.113.25 port 22 ssh2"
+    },
+    {
+      "eventTime": "2025-09-22T08:17:10Z",
+      "eventType": "SSH_LOGIN_FAILURE",
+      "sourceIP": "198.51.100.75",
+      "username": "root",
+      "port": 22,
+      "protocol": "ssh2",
+      "processId": 12371,
+      "severity": "WARNING",
+      "message": "Failed password for root from 198.51.100.75 port 22 ssh2"
+    },
+    {
+      "eventTime": "2025-09-22T08:17:12Z",
+      "eventType": "SSH_LOGIN_FAILURE",
+      "sourceIP": "198.51.100.75",
+      "username": "administrator",
+      "port": 22,
+      "protocol": "ssh2",
+      "processId": 12372,
+      "severity": "WARNING",
+      "message": "Failed password for administrator from 198.51.100.75 port 22 ssh2"
+    },
+    {
+      "eventTime": "2025-09-22T08:17:30Z",
+      "eventType": "SSH_LOGIN_SUCCESS",
+      "sourceIP": "10.0.1.100",
+      "username": "john.doe",
+      "port": 22,
+      "protocol": "ssh2",
+      "processId": 12376,
+      "severity": "INFO",
+      "message": "Accepted password for john.doe from 10.0.1.100 port 22 ssh2"
+    },
+    {
+      "eventTime": "2025-09-22T08:18:00Z",
+      "eventType": "SSH_LOGIN_FAILURE",
+      "sourceIP": "192.168.100.50",
+      "username": "root",
+      "port": 22,
+      "protocol": "ssh2",
+      "processId": 12378,
+      "severity": "WARNING",
+      "message": "Failed password for root from 192.168.100.50 port 22 ssh2"
+    },
+    {
+      "eventTime": "2025-09-22T08:18:10Z",
+      "eventType": "NETWORK_BLOCK",
+      "sourceIP": "192.168.100.50",
+      "action": "DROP",
+      "interface": "eth0",
+      "destinationPort": 22,
+      "protocol": "TCP",
+      "severity": "CRITICAL",
+      "message": "iptables: DROP IN=eth0 OUT= SRC=192.168.100.50 DST=10.0.1.50 LEN=60 PROTO=TCP SPT=45678 DPT=22"
+    },
+    {
+      "eventTime": "2025-09-22T08:18:12Z",
+      "eventType": "SECURITY_BAN",
+      "sourceIP": "192.168.100.50",
+      "service": "sshd",
+      "action": "BAN",
+      "tool": "fail2ban",
+      "severity": "CRITICAL",
+      "message": "NOTICE [sshd] Ban 192.168.100.50"
+    },
+    {
+      "eventTime": "2025-09-22T08:18:30Z",
+      "eventType": "SSH_LOGIN_FAILURE",
+      "sourceIP": "203.0.113.25",
+      "username": "root",
+      "port": 22,
+      "protocol": "ssh2",
+      "processId": 12384,
+      "severity": "WARNING",
+      "message": "Failed password for root from 203.0.113.25 port 22 ssh2"
+    },
+    {
+      "eventTime": "2025-09-22T08:19:00Z",
+      "eventType": "SSH_LOGIN_FAILURE",
+      "sourceIP": "185.220.101.50",
+      "username": "root",
+      "port": 22,
+      "protocol": "ssh2",
+      "processId": 12387,
+      "severity": "WARNING",
+      "message": "Failed password for root from 185.220.101.50 port 22 ssh2"
+    },
+    {
+      "eventTime": "2025-09-22T08:19:15Z",
+      "eventType": "SSH_LOGIN_FAILURE",
+      "sourceIP": "94.102.49.190",
+      "username": "root",
+      "port": 22,
+      "protocol": "ssh2",
+      "processId": 12389,
+      "severity": "WARNING",
+      "message": "Failed password for root from 94.102.49.190 port 22 ssh2"
+    },
+    {
+      "eventTime": "2025-09-22T08:19:45Z",
+      "eventType": "SECURITY_BAN",
+      "sourceIP": "203.0.113.25",
+      "service": "sshd",
+      "action": "BAN",
+      "tool": "fail2ban",
+      "severity": "CRITICAL",
+      "message": "NOTICE [sshd] Ban 203.0.113.25"
+    },
+    {
+      "eventTime": "2025-09-22T08:20:00Z",
+      "eventType": "SECURITY_BAN",
+      "sourceIP": "198.51.100.75",
+      "service": "sshd",
+      "action": "BAN",
+      "tool": "fail2ban",
+      "severity": "CRITICAL",
+      "message": "NOTICE [sshd] Ban 198.51.100.75"
+    },
+    {
+      "eventTime": "2025-09-22T08:20:15Z",
+      "eventType": "SSH_LOGIN_FAILURE",
+      "sourceIP": "159.89.123.45",
+      "username": "root",
+      "port": 22,
+      "protocol": "ssh2",
+      "processId": 12395,
+      "severity": "WARNING",
+      "message": "Failed password for root from 159.89.123.45 port 22 ssh2"
+    },
+    {
+      "eventTime": "2025-09-22T08:21:00Z",
+      "eventType": "SSH_LOGIN_SUCCESS",
+      "sourceIP": "10.0.1.150",
+      "username": "sarah.admin",
+      "port": 22,
+      "protocol": "ssh2",
+      "processId": 12400,
+      "authMethod": "publickey",
+      "severity": "INFO",
+      "message": "Accepted publickey for sarah.admin from 10.0.1.150 port 22 ssh2"
+    },
+    {
+      "eventTime": "2025-09-22T08:21:30Z",
+      "eventType": "SSH_LOGIN_FAILURE",
+      "sourceIP": "142.93.185.67",
+      "username": "root",
+      "port": 22,
+      "protocol": "ssh2",
+      "processId": 12402,
+      "severity": "WARNING",
+      "message": "Failed password for root from 142.93.185.67 port 22 ssh2"
+    },
+    {
+      "eventTime": "2025-09-22T08:21:31Z",
+      "eventType": "SSH_LOGIN_FAILURE",
+      "sourceIP": "142.93.185.67",
+      "username": "root",
+      "port": 22,
+      "protocol": "ssh2",
+      "processId": 12403,
+      "severity": "WARNING",
+      "message": "Failed password for root from 142.93.185.67 port 22 ssh2"
+    },
+    {
+      "eventTime": "2025-09-22T08:21:55Z",
+      "eventType": "SECURITY_BAN",
+      "sourceIP": "142.93.185.67",
+      "service": "sshd",
+      "action": "BAN",
+      "tool": "fail2ban",
+      "severity": "CRITICAL",
+      "message": "NOTICE [sshd] Ban 142.93.185.67"
+    }
+  ],
+  "attackSummary": {
+    "totalFailedAttempts": 23,
+    "uniqueAttackerIPs": 6,
+    "attackDuration": "6m32s",
+    "commonUsernames": ["root", "admin", "administrator", "user", "test"],
+    "blockedIPs": 4,
+    "legitimateLogins": 2
+  }
+}

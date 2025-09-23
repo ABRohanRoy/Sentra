@@ -95,7 +95,7 @@ def initialize_azure_client():
         azure_client = AzureOpenAI(
             azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
             api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-            api_version=os.getenv("AZURE_API_VERSION", "2024-02-15-preview")
+            api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
         )
         logger.info("Azure OpenAI client initialized")
         return azure_client
@@ -389,46 +389,212 @@ def search_logs(query: str, top_k: int = 5) -> List[str]:
         st.error(f"Search error: {e}")
         return []
 
-def generate_response(query: str, context_results: List[str]) -> str:
-    """Generate response using Azure OpenAI"""
-    if not azure_client:
-        return "Azure OpenAI not configured. Please set up your Azure credentials."
+# -------------------------
+# Enhanced AI Response Functions
+# -------------------------
+
+def analyze_log_context(context_results: List[str]) -> Dict:
+    """Analyze log context to provide better responses"""
+    analysis = {
+        'log_types': set(),
+        'services': set(),
+        'time_range': 'Unknown',
+        'total_entries': len(context_results),
+        'has_errors': False,
+        'ip_addresses': set(),
+        'status_codes': set()
+    }
     
+    timestamps = []
+    
+    for log_entry in context_results:
+        # Extract log type
+        if 'Service: CloudTrail' in log_entry:
+            analysis['log_types'].add('CloudTrail')
+            analysis['services'].add('CloudTrail')
+        elif 'Operation:' in log_entry:
+            analysis['log_types'].add('S3')
+            analysis['services'].add('S3')
+        elif 'Method:' in log_entry:
+            analysis['log_types'].add('Application/EC2')
+            analysis['services'].add('Application')
+        
+        # Extract timestamps
+        timestamp_match = re.search(r'\[([^\]]+)\]', log_entry)
+        if timestamp_match:
+            timestamps.append(timestamp_match.group(1))
+        
+        # Check for errors
+        if any(error in log_entry.lower() for error in ['error', 'fail', '4xx', '5xx', 'denied']):
+            analysis['has_errors'] = True
+        
+        # Extract IP addresses
+        ip_match = re.search(r'IP: (\d+\.\d+\.\d+\.\d+)', log_entry)
+        if ip_match:
+            analysis['ip_addresses'].add(ip_match.group(1))
+        
+        # Extract status codes
+        status_match = re.search(r'Status: (\d+)', log_entry)
+        if status_match:
+            analysis['status_codes'].add(status_match.group(1))
+    
+    # Determine time range
+    if timestamps:
+        if len(set(timestamps)) == 1:
+            analysis['time_range'] = f"Single point: {timestamps[0]}"
+        else:
+            analysis['time_range'] = f"{min(timestamps)} to {max(timestamps)}"
+    
+    return analysis
+
+def enhance_response_readability(ai_response: str, log_analysis: Dict) -> str:
+    """Post-process AI response to make it more human-friendly"""
+    
+    # Add context header
+    header_parts = []
+    if log_analysis['total_entries'] > 0:
+        header_parts.append(f"**Found {log_analysis['total_entries']} relevant log entries**")
+    
+    if log_analysis['log_types']:
+        header_parts.append(f"**Log Types**: {', '.join(log_analysis['log_types'])}")
+    
+    if log_analysis['time_range'] != 'Unknown':
+        header_parts.append(f"**Time Range**: {log_analysis['time_range']}")
+    
+    header = " | ".join(header_parts)
+    
+    # Add warning for errors
+    warning = ""
+    if log_analysis['has_errors']:
+        warning = "\n⚠️ **Alert**: Error conditions detected in the logs\n"
+    
+    # Format the response
+    formatted_response = f"""{header}
+{warning}
+## Summary
+
+{ai_response}
+
+---
+*Analysis based on {log_analysis['total_entries']} log entries*"""
+    
+    return formatted_response
+
+def generate_fallback_analysis(context_results: List[str]) -> str:
+    """Generate basic analysis when AI fails"""
+    if not context_results:
+        return "No log entries found to analyze."
+    
+    analysis = analyze_log_context(context_results)
+    
+    fallback = f"""**Basic Log Analysis:**
+
+• **Total Entries**: {analysis['total_entries']}
+• **Log Types Found**: {', '.join(analysis['log_types']) if analysis['log_types'] else 'Generic'}
+• **Time Range**: {analysis['time_range']}
+• **Services**: {', '.join(analysis['services']) if analysis['services'] else 'Various'}"""
+    
+    if analysis['ip_addresses']:
+        fallback += f"\n• **IP Addresses**: {len(analysis['ip_addresses'])} unique IPs"
+    
+    if analysis['status_codes']:
+        fallback += f"\n• **Status Codes**: {', '.join(sorted(analysis['status_codes']))}"
+    
+    if analysis['has_errors']:
+        fallback += "\n• **⚠️ Errors Detected**: Check logs for issues"
+    
+    return fallback
+
+def generate_response(query: str, context_results: List[str]) -> str:
+    """Generate human-friendly response using Azure OpenAI with better error handling"""
+    if not azure_client:
+        return """I'm not connected to Azure OpenAI right now. Please check your configuration:
+        
+- Verify your AZURE_OPENAI_ENDPOINT is correct
+- Check that AZURE_OPENAI_API_KEY is valid
+- Ensure AZURE_OPENAI_DEPLOYMENT matches your actual deployment name"""
+    
+    # Analyze the log context to provide better responses
+    log_analysis = analyze_log_context(context_results)
     context = "\n".join(context_results)
     
-    system_prompt = """You are Sentra, an expert AWS log analysis assistant. You help users understand their S3 access logs, EC2 logs, CloudTrail logs, and other AWS service logs.
+    # Dynamic system prompt based on log content
+    system_prompt = f"""You are Sentra, an expert AWS log analysis assistant. You analyze logs in a clear, human-friendly way.
 
-Key capabilities:
-- Analyze S3 access patterns, errors, and usage
-- Identify security issues in access logs
-- Explain CloudTrail events and API calls
-- Detect anomalies in EC2 and application logs
-- Provide actionable insights and recommendations
+Current log analysis shows:
+- Log Types: {', '.join(log_analysis['log_types'])}
+- Time Range: {log_analysis['time_range']}
+- Services: {', '.join(log_analysis['services'])}
 
-Always base your answers on the provided log data and be specific about what you find."""
+Response Guidelines:
+1. Start with a clear, direct summary
+2. Use bullet points for key findings
+3. Explain technical terms in simple language
+4. Highlight any security concerns or anomalies
+5. Provide actionable insights when possible
+6. Be conversational and avoid overly technical jargon
+
+Base your analysis on the provided log data and be specific about what you find."""
     
     user_prompt = f"""Query: {query}
 
-Relevant log entries:
+Relevant log entries ({len(context_results)} found):
 {context}
 
-Please analyze the above log data and provide a comprehensive answer."""
+Please analyze these logs and provide a clear, human-friendly explanation of what's happening."""
     
     try:
         with st.spinner("Generating AI response..."):
             response = azure_client.chat.completions.create(
-                model=os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4"),
+                model=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o"),
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                max_tokens=1500,
-                temperature=0.1
+                max_tokens=2000,  # Increased for more detailed responses
+                temperature=0.2,  # Slightly higher for more natural responses
             )
             
-            return response.choices[0].message.content
+            ai_response = response.choices[0].message.content
+            
+            # Post-process response to make it more human-friendly
+            return enhance_response_readability(ai_response, log_analysis)
     except Exception as e:
-        return f"I encountered an error analyzing your query: {str(e)}"
+        error_msg = str(e)
+        
+        # Provide helpful error messages
+        if "DeploymentNotFound" in error_msg:
+            return """**Configuration Issue Detected** 🔧
+
+The Azure OpenAI deployment couldn't be found. Here's what to check:
+
+• **Deployment Name**: Verify your AZURE_OPENAI_DEPLOYMENT in .env matches your actual Azure deployment
+• **Region**: Ensure your endpoint region matches where your deployment is located  
+• **Wait Time**: If you just created the deployment, wait 5-10 minutes for it to be available
+
+**Current Configuration Check:**
+- Endpoint: {0}
+- Deployment: {1}""".format(
+                os.getenv("AZURE_OPENAI_ENDPOINT", "Not set"),
+                os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "Not set")
+            )
+        
+        elif "InvalidApiKey" in error_msg:
+            return """**API Key Issue** 🔑
+
+Your Azure OpenAI API key appears to be invalid or expired. Please:
+
+• Check your AZURE_OPENAI_API_KEY in the .env file
+• Verify the key hasn't expired in your Azure portal
+• Ensure you're using the correct key for your deployment"""
+        
+        else:
+            return f"""**Analysis Error** ⚠️
+
+I encountered an issue while analyzing your logs: {error_msg}
+
+**What I can tell you from the log entries:**
+{generate_fallback_analysis(context_results)}"""
 
 # -------------------------
 # Conversation Management
@@ -596,7 +762,7 @@ def main():
                 st.write("**🕐 Time:**", datetime.fromisoformat(conv['timestamp']).strftime("%Y-%m-%d %H:%M:%S"))
                 st.write("**❓ Query:**", conv['query'])
                 st.write("**🤖 Response:**")
-                st.write(conv['response'])
+                st.markdown(conv['response'])
                 
                 if conv.get('matching_logs'):
                     st.write("**📝 Matching Logs:**")
@@ -658,7 +824,7 @@ def query_logs_ui(query: str, top_k: int):
     
     # Display results
     st.subheader("🤖 AI Analysis")
-    st.write(response)
+    st.markdown(response)
     
     # Show matching logs
     st.subheader(f"📝 Matching Log Entries ({len(results)} found)")
