@@ -47,7 +47,7 @@ METADATA_PATH = DATA_DIR / "logs_reference.txt"
 CONVERSATION_PATH = DATA_DIR / "conversations.json"
 FILE_HASHES_PATH = DATA_DIR / "file_hashes.json"
 
-# Initialize embedding model using .env values (matching original format)
+# Initialize embedding model using .env values
 embedding_model = None
 if LANGCHAIN_AVAILABLE:
     try:
@@ -133,7 +133,6 @@ def mark_file_processed(file_path: str):
 
 def parse_s3_log_line(line: str) -> Optional[Dict]:
     """Parse S3 access log line"""
-    # S3 log format is space-separated with some quoted fields
     parts = []
     current = ""
     in_quotes = False
@@ -152,7 +151,7 @@ def parse_s3_log_line(line: str) -> Optional[Dict]:
     if current:
         parts.append(current.strip('"'))
     
-    if len(parts) < 20:  # S3 logs should have many fields
+    if len(parts) < 20:
         return None
     
     try:
@@ -182,7 +181,6 @@ def parse_s3_log_line(line: str) -> Optional[Dict]:
 
 def parse_ec2_log_line(line: str) -> Optional[Dict]:
     """Parse EC2/generic log line"""
-    # Try to extract timestamp, IP, and other common fields
     timestamp_pattern = r'(\d{4}-\d{2}-\d{2}[\sT]\d{2}:\d{2}:\d{2})'
     ip_pattern = r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'
     
@@ -200,12 +198,10 @@ def parse_ec2_log_line(line: str) -> Optional[Dict]:
     if ip_match:
         entry['ip'] = ip_match.group(1)
     
-    # Look for HTTP status codes
     status_match = re.search(r'\b([1-5]\d{2})\b', line)
     if status_match:
         entry['status'] = status_match.group(1)
     
-    # Look for HTTP methods
     method_match = re.search(r'\b(GET|POST|PUT|DELETE|HEAD|OPTIONS|PATCH)\b', line)
     if method_match:
         entry['method'] = method_match.group(1)
@@ -213,15 +209,13 @@ def parse_ec2_log_line(line: str) -> Optional[Dict]:
     return entry
 
 def parse_json_log(file_path: str) -> List[Dict]:
-    """Parse JSON log files (like CloudTrail)"""
+    """Parse JSON log files"""
     entries = []
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
             
-            # Handle different JSON log formats
             if isinstance(data, dict):
-                # Single JSON object (like CloudTrail digest)
                 entry = {
                     'log_type': 'JSON',
                     'source_file': os.path.basename(file_path),
@@ -233,7 +227,6 @@ def parse_json_log(file_path: str) -> List[Dict]:
                 entries.append(entry)
                 
             elif isinstance(data, list):
-                # Array of JSON objects
                 for i, item in enumerate(data):
                     entry = {
                         'log_type': 'JSON',
@@ -250,7 +243,7 @@ def parse_json_log(file_path: str) -> List[Dict]:
     return entries
 
 def parse_log_file(file_path: str) -> List[Dict]:
-    """Parse log file with format detection (matching original function name)"""
+    """Parse log file with format detection"""
     if not os.path.exists(file_path):
         logger.error(f"File not found: {file_path}")
         return []
@@ -263,15 +256,12 @@ def parse_log_file(file_path: str) -> List[Dict]:
     entries = []
     
     try:
-        # Handle JSON files
         if file_ext == '.json':
             entries = parse_json_log(file_path)
         else:
-            # Handle .log and .txt files
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 lines = f.readlines()
             
-            # Detect log format from first few lines
             sample_lines = [line.strip() for line in lines[:5] if line.strip()]
             is_s3_log = any('amazonaws.com' in line or 'WEBSITE.GET.OBJECT' in line for line in sample_lines)
             
@@ -307,14 +297,13 @@ def load_log_chunks(file_paths: List[str]) -> List[str]:
         entries = parse_log_file(file_path)
         all_entries.extend(entries)
     
-    # Format entries as strings (matching original format)
     formatted_chunks = []
     for entry in all_entries:
         if entry.get('log_type') == 'S3':
             chunk = f"[{entry.get('timestamp', 'N/A')}] IP: {entry.get('remote_ip', 'N/A')} | Operation: {entry.get('operation', 'N/A')} | Object: {entry.get('key', 'N/A')} | Status: {entry.get('http_status', 'N/A')} | Bytes: {entry.get('bytes_sent', 'N/A')}"
         elif entry.get('log_type') == 'JSON':
             chunk = f"[{entry.get('timestamp', 'N/A')}] Service: {entry.get('service', 'AWS')} | Account: {entry.get('aws_account', 'N/A')} | File: {entry.get('source_file', 'N/A')}"
-        else:  # EC2 or generic
+        else:
             chunk = f"[{entry.get('timestamp', 'N/A')}] IP: {entry.get('ip', 'N/A')} | Method: {entry.get('method', 'N/A')} | Status: {entry.get('status', 'N/A')} | Raw: {entry.get('raw_line', '')[:100]}"
         
         formatted_chunks.append(chunk)
@@ -322,7 +311,7 @@ def load_log_chunks(file_paths: List[str]) -> List[str]:
     return formatted_chunks
 
 def store_vector(log_chunks: List[str]):
-    """Store vectors in FAISS index (matching original function)"""
+    """Store vectors in FAISS index"""
     if not embedding_model:
         logger.error("Embedding model not available")
         return None
@@ -335,7 +324,6 @@ def store_vector(log_chunks: List[str]):
         vectors = np.array(embedding_model.embed_documents(log_chunks)).astype("float32")
         dimension = vectors.shape[1]
         
-        # Load existing index or create new one
         if VECTOR_INDEX_PATH.exists():
             index = faiss.read_index(str(VECTOR_INDEX_PATH))
             logger.info(f"Loaded existing index with {index.ntotal} vectors")
@@ -343,11 +331,9 @@ def store_vector(log_chunks: List[str]):
             index = faiss.IndexFlatL2(dimension)
             logger.info("Created new FAISS index")
         
-        # Add new vectors
         index.add(vectors)
         faiss.write_index(index, str(VECTOR_INDEX_PATH))
         
-        # Append logs to reference file
         with open(METADATA_PATH, "a", encoding="utf-8") as f:
             for log in log_chunks:
                 f.write(log + "\n")
@@ -360,7 +346,7 @@ def store_vector(log_chunks: List[str]):
         return None
 
 def search(query: str, top_k: int = 5) -> List[str]:
-    """Search for similar log entries (matching original function)"""
+    """Search for similar log entries"""
     if not embedding_model:
         logger.error("Embedding model not available")
         return []
@@ -374,7 +360,6 @@ def search(query: str, top_k: int = 5) -> List[str]:
         query_vector = np.array([embedding_model.embed_query(query)]).astype("float32")
         distances, indices = index.search(query_vector, min(top_k, index.ntotal))
         
-        # Retrieve matching logs
         with open(METADATA_PATH, "r", encoding="utf-8") as f:
             logs = f.readlines()
         
@@ -390,158 +375,120 @@ def search(query: str, top_k: int = 5) -> List[str]:
         return []
 
 # -------------------------
-# Enhanced AI Response Functions
+# Domain Restriction Functions
 # -------------------------
 
-def analyze_log_context(context_results: List[str]) -> Dict:
-    """Analyze log context to provide better responses"""
-    analysis = {
-        'log_types': set(),
-        'services': set(),
-        'time_range': 'Unknown',
-        'total_entries': len(context_results),
-        'has_errors': False,
-        'ip_addresses': set(),
-        'status_codes': set()
-    }
+def is_query_in_scope(query: str) -> bool:
+    """Check if query is within allowed technical domains"""
+    query_lower = query.lower()
     
-    timestamps = []
-    
-    for log_entry in context_results:
-        # Extract log type
-        if 'Service: CloudTrail' in log_entry:
-            analysis['log_types'].add('CloudTrail')
-            analysis['services'].add('CloudTrail')
-        elif 'Operation:' in log_entry:
-            analysis['log_types'].add('S3')
-            analysis['services'].add('S3')
-        elif 'Method:' in log_entry:
-            analysis['log_types'].add('Application/EC2')
-            analysis['services'].add('Application')
+    # Allowed technical keywords
+    allowed_domains = [
+        # IT/Development
+        'log', 'logs', 'server', 'database', 'application', 'code', 'programming',
+        'software', 'system', 'network', 'infrastructure', 'api', 'service',
+        'deployment', 'configuration', 'performance', 'monitoring', 'debug',
         
-        # Extract timestamps
-        timestamp_match = re.search(r'\[([^\]]+)\]', log_entry)
-        if timestamp_match:
-            timestamps.append(timestamp_match.group(1))
+        # Cybersecurity
+        'security', 'attack', 'threat', 'vulnerability', 'breach', 'malware',
+        'firewall', 'intrusion', 'authentication', 'authorization', 'encryption',
+        'phishing', 'exploit', 'penetration', 'incident', 'forensic', 'brute force',
+        'ddos', 'sql injection', 'xss', 'csrf', 'malicious', 'suspicious',
         
-        # Check for errors
-        if any(error in log_entry.lower() for error in ['error', 'fail', '4xx', '5xx', 'denied']):
-            analysis['has_errors'] = True
+        # Cloud/AWS
+        'aws', 'azure', 'gcp', 'cloud', 'ec2', 's3', 'lambda', 'cloudtrail',
+        'cloudformation', 'kubernetes', 'docker', 'container', 'serverless',
+        'vpc', 'iam', 'cloudwatch', 'load balancer', 'autoscaling',
         
-        # Extract IP addresses
-        ip_match = re.search(r'IP: (\d+\.\d+\.\d+\.\d+)', log_entry)
-        if ip_match:
-            analysis['ip_addresses'].add(ip_match.group(1))
+        # DevOps
+        'devops', 'ci/cd', 'pipeline', 'automation', 'jenkins', 'git', 'docker',
+        'terraform', 'ansible', 'chef', 'puppet', 'monitoring', 'alerting',
+        'deployment', 'orchestration', 'microservices',
         
-        # Extract status codes
-        status_match = re.search(r'Status: (\d+)', log_entry)
-        if status_match:
-            analysis['status_codes'].add(status_match.group(1))
+        # AI/ML
+        'ai', 'artificial intelligence', 'machine learning', 'ml', 'model',
+        'algorithm', 'neural network', 'deep learning', 'training', 'prediction',
+        'classification', 'regression', 'clustering', 'nlp', 'computer vision'
+    ]
     
-    # Determine time range
-    if timestamps:
-        if len(set(timestamps)) == 1:
-            analysis['time_range'] = f"Single point: {timestamps[0]}"
-        else:
-            analysis['time_range'] = f"{min(timestamps)} to {max(timestamps)}"
+    # Blocked non-technical topics
+    blocked_topics = [
+        'movie', 'film', 'actor', 'actress', 'director', 'cinema', 'hollywood',
+        'sport', 'football', 'basketball', 'soccer', 'baseball', 'tennis',
+        'music', 'song', 'singer', 'band', 'album', 'concert',
+        'food', 'recipe', 'cooking', 'restaurant', 'cuisine',
+        'travel', 'vacation', 'tourism', 'hotel', 'flight',
+        'politics', 'government', 'election', 'politician',
+        'weather', 'climate', 'temperature', 'rain', 'snow',
+        'health', 'medicine', 'doctor', 'disease', 'treatment',
+        'fashion', 'clothing', 'style', 'brand',
+        'celebrity', 'gossip', 'entertainment', 'tv show',
+        'book', 'novel', 'author', 'literature', 'poetry'
+    ]
     
-    return analysis
-
-def enhance_response_readability(ai_response: str, log_analysis: Dict) -> str:
-    """Post-process AI response to make it more human-friendly"""
+    # Check for blocked topics first
+    for blocked in blocked_topics:
+        if blocked in query_lower:
+            return False
     
-    # Add context header
-    header_parts = []
-    if log_analysis['total_entries'] > 0:
-        header_parts.append(f"**Found {log_analysis['total_entries']} relevant log entries**")
+    # Check for allowed technical terms
+    for allowed in allowed_domains:
+        if allowed in query_lower:
+            return True
     
-    if log_analysis['log_types']:
-        header_parts.append(f"**Log Types**: {', '.join(log_analysis['log_types'])}")
+    # Technical indicators
+    technical_indicators = ['analyze', 'show', 'find', 'detect', 'monitor', 'trace', 'debug']
+    if any(indicator in query_lower for indicator in technical_indicators):
+        return True
     
-    if log_analysis['time_range'] != 'Unknown':
-        header_parts.append(f"**Time Range**: {log_analysis['time_range']}")
-    
-    header = " | ".join(header_parts)
-    
-    # Add warning for errors
-    warning = ""
-    if log_analysis['has_errors']:
-        warning = "\n⚠️ **Alert**: Error conditions detected in the logs\n"
-    
-    # Format the response
-    formatted_response = f"""{header}
-{warning}
-## Summary
-
-{ai_response}
-
----
-*Analysis based on {log_analysis['total_entries']} log entries*"""
-    
-    return formatted_response
-
-def generate_fallback_analysis(context_results: List[str]) -> str:
-    """Generate basic analysis when AI fails"""
-    if not context_results:
-        return "No log entries found to analyze."
-    
-    analysis = analyze_log_context(context_results)
-    
-    fallback = f"""**Basic Log Analysis:**
-
-• **Total Entries**: {analysis['total_entries']}
-• **Log Types Found**: {', '.join(analysis['log_types']) if analysis['log_types'] else 'Generic'}
-• **Time Range**: {analysis['time_range']}
-• **Services**: {', '.join(analysis['services']) if analysis['services'] else 'Various'}"""
-    
-    if analysis['ip_addresses']:
-        fallback += f"\n• **IP Addresses**: {len(analysis['ip_addresses'])} unique IPs"
-    
-    if analysis['status_codes']:
-        fallback += f"\n• **Status Codes**: {', '.join(sorted(analysis['status_codes']))}"
-    
-    if analysis['has_errors']:
-        fallback += "\n• **⚠️ Errors Detected**: Check logs for issues"
-    
-    return fallback
+    return False
 
 def ask_gpt(query: str, context_results: List[str]) -> str:
-    """Generate human-friendly response using Azure OpenAI with better error handling"""
+    """Generate domain-restricted response using Azure OpenAI"""
     if not azure_client:
-        return """I'm not connected to Azure OpenAI right now. Please check your configuration:
-        
-- Verify your AZURE_OPENAI_ENDPOINT is correct
-- Check that AZURE_OPENAI_API_KEY is valid
-- Ensure AZURE_OPENAI_DEPLOYMENT matches your actual deployment name"""
+        return """Azure OpenAI not configured. Check your .env file:
+- AZURE_OPENAI_ENDPOINT
+- AZURE_OPENAI_API_KEY  
+- AZURE_OPENAI_DEPLOYMENT_NAME"""
     
-    # Analyze the log context to provide better responses
-    log_analysis = analyze_log_context(context_results)
+    # Check if query is within allowed domains
+    if not is_query_in_scope(query):
+        return """I'm Sentra, focused on IT, Cybersecurity, AI, DevOps, and Cloud technologies.
+
+I can help with:
+- Log analysis and security monitoring
+- AWS services and cloud infrastructure  
+- DevOps practices and automation
+- Cybersecurity threats and analysis
+- IT systems and development
+- AI/ML applications in these domains
+
+Please ask technical questions in these areas."""
+    
     context = "\n".join(context_results)
     
-    # Dynamic system prompt based on log content
-    system_prompt = f"""You are Sentra, an expert AWS log analysis assistant. You analyze logs in a clear, human-friendly way.
+    system_prompt = f"""You are Sentra, an AWS log analysis assistant specialized in IT, Cybersecurity, AI, DevOps, and Cloud technologies.
 
-Current log analysis shows:
-- Log Types: {', '.join(log_analysis['log_types'])}
-- Time Range: {log_analysis['time_range']}
-- Services: {', '.join(log_analysis['services'])}
+DOMAIN RESTRICTIONS: Only respond to queries about:
+- IT Development & Systems
+- Cybersecurity & Threat Analysis  
+- AI/Machine Learning
+- DevOps & Infrastructure
+- Cloud Technologies (AWS, Azure, GCP)
+- Log analysis and monitoring
 
-Response Guidelines:
-1. Start with a clear, direct summary which basically tells everything that the user has asked...
-2. Use bullet points for key findings related to what the user has asked. Make it simple to understand
-3. Explain technical terms in simple language
-4. Highlight any security concerns or anomalies
-5. Provide actionable insights when possible
-6. Be conversational and avoid overly technical jargon
-
-Base your analysis on the provided log data and be specific about what you find."""
+Instructions:
+- Answer the specific question asked
+- Be direct and concise
+- Focus on technical accuracy
+- Only mention relevant findings from the logs"""
     
     user_prompt = f"""Query: {query}
 
 Relevant log entries ({len(context_results)} found):
 {context}
 
-Please analyze these logs and provide a clear, human-friendly explanation of what's happening."""
+Provide a focused technical response."""
     
     try:
         response = azure_client.chat.completions.create(
@@ -550,51 +497,30 @@ Please analyze these logs and provide a clear, human-friendly explanation of wha
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            max_tokens=2000,  # Increased for more detailed responses
-            temperature=0.2,  # Slightly higher for more natural responses
+            max_tokens=1000,
+            temperature=0.1,
         )
         
-        ai_response = response.choices[0].message.content
-        
-        # Post-process response to make it more human-friendly
-        return enhance_response_readability(ai_response, log_analysis)
+        return response.choices[0].message.content
         
     except Exception as e:
         error_msg = str(e)
         
-        # Provide helpful error messages
         if "DeploymentNotFound" in error_msg:
-            return """**Configuration Issue Detected** 🔧
+            return f"""Configuration Issue: Azure OpenAI deployment not found.
 
-The Azure OpenAI deployment couldn't be found. Here's what to check:
-
-• **Deployment Name**: Verify your AZURE_OPENAI_DEPLOYMENT in .env matches your actual Azure deployment
-• **Region**: Ensure your endpoint region matches where your deployment is located  
-• **Wait Time**: If you just created the deployment, wait 5-10 minutes for it to be available
-
-**Current Configuration Check:**
-- Endpoint: {0}
-- Deployment: {1}""".format(
-                os.getenv("AZURE_OPENAI_ENDPOINT", "Not set"),
-                os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "Not set")
-            )
+Check your .env file:
+- AZURE_OPENAI_DEPLOYMENT_NAME should match your actual deployment
+- Current setting: {os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "Not set")}
+- Endpoint: {os.getenv("AZURE_OPENAI_ENDPOINT", "Not set")}"""
         
         elif "InvalidApiKey" in error_msg:
-            return """**API Key Issue** 🔑
+            return """API Key Issue: Invalid or expired Azure OpenAI API key.
 
-Your Azure OpenAI API key appears to be invalid or expired. Please:
-
-• Check your AZURE_OPENAI_API_KEY in the .env file
-• Verify the key hasn't expired in your Azure portal
-• Ensure you're using the correct key for your deployment"""
+Check your AZURE_OPENAI_API_KEY in the .env file."""
         
         else:
-            return f"""**Analysis Error** ⚠️
-
-I encountered an issue while analyzing your logs: {error_msg}
-
-**What I can tell you from the log entries:**
-{generate_fallback_analysis(context_results)}"""
+            return f"Analysis Error: {error_msg}\n\nFound {len(context_results)} relevant log entries."
 
 # -------------------------
 # Chat Memory Management
@@ -625,10 +551,9 @@ def add_to_conversation(query: str, response: str, results: List[str]):
         "timestamp": datetime.now().isoformat(),
         "query": query,
         "response": response,
-        "matching_logs": results[:3]  # Store top 3 matches
+        "matching_logs": results[:3]
     })
     
-    # Keep only last 50 conversations
     if len(conversation) > 50:
         conversation = conversation[-50:]
     
@@ -640,7 +565,6 @@ def get_conversation_context() -> str:
     if not conversation:
         return ""
     
-    # Get last 3 conversations for context
     recent = conversation[-3:]
     context_parts = []
     
@@ -686,13 +610,11 @@ def process_files(file_paths: List[str]) -> Dict:
         return {"success": False, "message": "No files provided"}
     
     try:
-        # Load and process logs
         log_chunks = load_log_chunks(file_paths)
         
         if not log_chunks:
             return {"success": False, "message": "No valid log entries found"}
         
-        # Store vectors
         vectors = store_vector(log_chunks)
         
         if vectors is not None:
@@ -710,11 +632,9 @@ def process_files(file_paths: List[str]) -> Dict:
 def query_logs(query: str, top_k: int = 5) -> Dict:
     """Query logs and return response with context"""
     try:
-        # Get conversation context
         context = get_conversation_context()
         enhanced_query = f"{context}\n\nCurrent query: {query}" if context else query
         
-        # Search for relevant logs
         results = search(enhanced_query, top_k)
         
         if not results:
@@ -723,10 +643,8 @@ def query_logs(query: str, top_k: int = 5) -> Dict:
                 "message": "No matching log entries found. Please make sure you have processed some log files first."
             }
         
-        # Generate response
         response = ask_gpt(query, results)
         
-        # Save to conversation
         add_to_conversation(query, response, results)
         
         return {
@@ -742,26 +660,24 @@ def query_logs(query: str, top_k: int = 5) -> Dict:
         return {"success": False, "message": f"Error: {str(e)}"}
 
 # -------------------------
-# Main CLI Interface (matching original)
+# Main CLI Interface
 # -------------------------
 
 if __name__ == "__main__":
-    print("🚀 Sentra - AWS Log Analysis RAG Agent")
+    print("Sentra - AWS Log Analysis RAG Agent")
     print("Supports S3 Access Logs, EC2 Logs, CloudTrail JSON, and more!")
     print("-" * 50)
     
-    # Check system status
     stats = get_system_stats()
-    print(f"✅ Azure OpenAI: {'Configured' if stats['azure_configured'] else 'Not configured'}")
-    print(f"✅ Embeddings: {'Configured' if stats['embeddings_configured'] else 'Not configured'}")
-    print(f"📊 Processed Files: {stats['total_files']}")
-    print(f"🔍 Log Entries: {stats['total_logs']}")
+    print(f"Azure OpenAI: {'Configured' if stats['azure_configured'] else 'Not configured'}")
+    print(f"Embeddings: {'Configured' if stats['embeddings_configured'] else 'Not configured'}")
+    print(f"Processed Files: {stats['total_files']}")
+    print(f"Log Entries: {stats['total_logs']}")
     
     if not stats['embeddings_configured']:
-        print("\n⚠️ Embedding model not configured. Please check your .env file.")
+        print("\nEmbedding model not configured. Please check your .env file.")
         exit(1)
     
-    # Main loop
     while True:
         print("\n" + "="*50)
         print("Options:")
@@ -781,49 +697,49 @@ if __name__ == "__main__":
             if file_input:
                 file_paths = [f.strip() for f in file_input.split(",")]
                 result = process_files(file_paths)
-                print(f"\n{'✅' if result['success'] else '❌'} {result['message']}")
+                print(f"\n{'Success' if result['success'] else 'Error'}: {result['message']}")
         
         elif choice == "2":
             if not stats['has_data']:
-                print("\n⚠️ No data available. Please process some log files first.")
+                print("\nNo data available. Please process some log files first.")
                 continue
                 
-            query = input("\n🔍 Enter your query: ").strip()
+            query = input("\nEnter your query: ").strip()
             if query:
-                print("\n🤖 Analyzing logs...")
+                print("\nAnalyzing logs...")
                 result = query_logs(query)
                 
                 if result['success']:
-                    print(f"\n📝 Query: {result['query']}")
-                    print("📝 Matching Log Entries:")
+                    print(f"\nQuery: {result['query']}")
+                    print("Matching Log Entries:")
                     for i, log in enumerate(result['matching_logs'], 1):
                         print(f"  {i}. {log}")
                     
-                    print(f"\n🤖 GPT Insight:")
+                    print(f"\nAnalysis:")
                     print(result['response'])
                 else:
-                    print(f"\n❌ {result['message']}")
+                    print(f"\nError: {result['message']}")
         
         elif choice == "3":
             conversation = load_conversation()
             if conversation:
-                print(f"\n📜 Recent Conversations ({len(conversation)} total):")
-                for i, item in enumerate(conversation[-5:], 1):  # Show last 5
+                print(f"\nRecent Conversations ({len(conversation)} total):")
+                for i, item in enumerate(conversation[-5:], 1):
                     print(f"\n{i}. [{item['timestamp']}]")
                     print(f"   Q: {item['query']}")
                     print(f"   A: {item['response'][:150]}...")
             else:
-                print("\n📜 No conversation history found.")
+                print("\nNo conversation history found.")
         
         elif choice == "4":
-            confirm = input("\n⚠️ Clear all data? (y/N): ").strip().lower()
+            confirm = input("\nClear all data? (y/N): ").strip().lower()
             if confirm == 'y':
                 clear_all_data()
-                print("✅ All data cleared.")
+                print("All data cleared.")
         
         elif choice == "5":
-            print("\n👋 Goodbye!")
+            print("\nGoodbye!")
             break
         
         else:
-            print("\n❌ Invalid option. Please try again.")
+            print("\nInvalid option. Please try again.")
